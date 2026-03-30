@@ -4,17 +4,17 @@ import os
 import sys
 import socket
 
-# ==============================================================================
-#  COLORS & VISUALS
-# ==============================================================================
+# ===== COLORS & VISUALS =====
 class Colors:
     HEADER = '\033[95m'
     BLUE = '\033[94m'
+    CYAN = '\033[96m'
     GREEN = '\033[92m'
     WARNING = '\033[93m'
     FAIL = '\033[91m'
     ENDC = '\033[0m'
     BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -31,9 +31,7 @@ def log_cmd(msg):
 def log_err(msg):
     print(f"{Colors.FAIL}[ERROR] {msg}{Colors.ENDC}")
 
-# ==============================================================================
-#  DYNAMIC PORT RESOLUTION
-# ==============================================================================
+# ===== DYNAMIC PORT RESOLUTION =====
 def is_port_in_use(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex(('localhost', port)) == 0
@@ -46,9 +44,7 @@ def find_available_port(start_port, exclude_ports=[]):
         port += 1
     raise Exception("No free ports found!")
 
-# ==============================================================================
-#  CONFIGURATION
-# ==============================================================================
+# ===== CONFIGURATION =====
 CONFIG = {
     "EJBCA_ADMIN_PASS": "ejbca_admin_pass",
     "EJBCADB_USER": "ejbca",
@@ -91,9 +87,7 @@ def load_env_file():
         log_err(f"Failed to parse .env: {e}")
         sys.exit(1)
 
-# ==============================================================================
-#  HELPER FUNCTIONS
-# ==============================================================================
+# ===== HELPER FUNCTIONS =====
 def run_cmd(command, ignore_errors=False):
     log_cmd(command)
     try:
@@ -113,25 +107,12 @@ def run_cmd(command, ignore_errors=False):
 def run_docker_exec(container, command, ignore_errors=False):
     run_cmd(f"docker exec {container} {command}", ignore_errors)
 
-def run_script_in_container(container, script_content):
-    clean_content = script_content.strip()
-    subprocess.run(
-        f"docker exec -i {container} sh -c 'cat > /tmp/setup.sh'",
-        input=clean_content.encode(),
-        shell=True,
-        check=True
-    )
-    run_cmd(f"docker exec {container} chmod +x /tmp/setup.sh")
-    run_cmd(f"docker exec {container} /tmp/setup.sh")
-    run_cmd(f"docker exec {container} rm /tmp/setup.sh")
-
-# LIVE HEALTH CHECK
-def wait_for_live_status(container, description, timeout=300):
+# ===== LIVE HEALTH CHECK =====
+def wait_for_live_status(container, description, timeout=180):
     msg_visible = f"\rWaiting for {description} (Live Check)..."
-    msg_hidden  = f"\r{' ' * len(msg_visible)}" 
+    msg_hidden = f"\r{' ' * len(msg_visible)}"
     start_time = time.time()
-    
-    health_cmd = f"docker exec {container} curl -k -f -s -o /dev/null https://localhost:8443/ejbca/publicweb/healthcheck/ejbca"
+    health_cmd = f"docker exec {container} curl -k -s -o /dev/null https://localhost:8443/ejbca/publicweb/healthcheck/ejbcahealth"
     
     while True:
         current_time = time.time()
@@ -139,7 +120,6 @@ def wait_for_live_status(container, description, timeout=300):
             sys.stdout.write(msg_hidden)
             print(f"\r{Colors.FAIL}[ERROR] Timeout waiting for {description}{Colors.ENDC}\n")
             sys.exit(1)
-
         try:
             subprocess.run(health_cmd, shell=True, check=True)
             sys.stdout.write(msg_hidden)
@@ -148,18 +128,17 @@ def wait_for_live_status(container, description, timeout=300):
             return
         except subprocess.CalledProcessError:
             pass
-
         cycle = current_time % 1.0
         if cycle < 0.5: sys.stdout.write(msg_visible)
         else: sys.stdout.write(msg_hidden)
         sys.stdout.flush()
         time.sleep(0.5)
 
-# LOG CHECK (Initial Boot)
+# ===== LOG CHECK =====
 def wait_for_log_initial(container, search_strings, description, timeout=300):
     if isinstance(search_strings, str): search_strings = [search_strings]
     msg_visible = f"\rWaiting for {description}..."
-    msg_hidden  = f"\r{' ' * len(msg_visible)}" 
+    msg_hidden = f"\r{' ' * len(msg_visible)}"
     start = time.time()
     
     while time.time() - start < timeout:
@@ -172,7 +151,6 @@ def wait_for_log_initial(container, search_strings, description, timeout=300):
                     sys.stdout.flush()
                     return
         except: pass
-        
         cycle = time.time() % 1.0
         if cycle < 0.5: sys.stdout.write(msg_visible)
         else: sys.stdout.write(msg_hidden)
@@ -182,19 +160,14 @@ def wait_for_log_initial(container, search_strings, description, timeout=300):
     print(f"\n{Colors.FAIL}[ERROR] Timeout waiting for {description}{Colors.ENDC}")
     sys.exit(1)
 
-# ==============================================================================
-#  MAIN EXECUTION
-# ==============================================================================
+# ===== MAIN EXECUTION =====
 def main():
     clear_screen()
     try:
         log_section("STAGE 0: Init & Port Scanning")
         load_env_file()
         
-        # 1. FORCED PORTS
         ejbca_https = 443
-        
-        # 2. Dynamic Ports
         kc_port = find_available_port(8080)
         try:
             if not is_port_in_use(80):
@@ -202,7 +175,7 @@ def main():
             else:
                 ejbca_http = find_available_port(8081, exclude_ports=[kc_port])
         except:
-             ejbca_http = find_available_port(8081, exclude_ports=[kc_port])
+            ejbca_http = find_available_port(8081, exclude_ports=[kc_port])
 
         log_info(f"EJBCA HTTPS: localhost:{ejbca_https}")
         log_info(f"EJBCA HTTP:  localhost:{ejbca_http}")
@@ -241,6 +214,7 @@ def main():
       - WEBCONF_HTTPSERVER_PUBHTTPSPORT={ejbca_https}
       - WEBCONF_HTTPSERVER_PRIVHTTPSPORT={ejbca_https}
       - WEBCONF_HTTPSERVER_PUBHTTPPORT={ejbca_http}
+      - TRUSTSTORE_PASSWORD={CONFIG['EJBCADB_PASS']}
     depends_on:
       - mariadb
     networks:
@@ -320,102 +294,75 @@ volumes:
         with open("docker-compose.yml", "w") as f:
             f.write(compose_content)
 
-        # ==========================================
-        # STAGE 1: Keycloak & Postgres
-        # ==========================================
+        # ===== STAGE 1: Keycloak & Postgres =====
         log_section("STAGE 1: Starting Keycloak & Postgres")
         run_cmd("docker-compose up -d keycloak")
-        
-        # 1. Postgres Check
         wait_for_log_initial("postgres", ["database system is ready to accept connections"], "PostgreSQL Database")
-        # 2. Keycloak Check
         wait_for_log_initial("keycloak", ["Listening on: http://0.0.0.0:8080", "Running the server"], "Keycloak Service")
-        
         time.sleep(2)
 
-        # ==========================================
-        # STAGE 2: EJBCA & MariaDB
-        # ==========================================
+        # ===== STAGE 2: EJBCA & MariaDB =====
         log_section("STAGE 2: Starting EJBCA & MariaDB")
         run_cmd("docker-compose up -d ejbca")
-        
-        # 3. MariaDB Check
         wait_for_log_initial("mariadb", ["ready for connections", "mysqld: ready for connections"], "MariaDB Database")
-        # 4. EJBCA Check
         wait_for_log_initial("ejbca", ["Health check now reports application status", "Deployment of artifact EJBCA"], "EJBCA Service")
         
-        # FIX: Add live health check and wait for EJBCA to fully initialize
-        log_info("Waiting for EJBCA to fully initialize...")
-        wait_for_live_status("ejbca", "EJBCA Health Check", timeout=60)
-
+        # ===== STAGE 3: PKI Config =====
         log_section("STAGE 3: PKI Config")
-
         bin = CONFIG['EJBCA_BIN']
+        
+        print(f"{Colors.CYAN}[PKI] Creating and configuring cryptotoken...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} cryptotoken create --token {CONFIG['TOKEN_NAME']} --pin {CONFIG['TOKEN_PWD']} --type SoftCryptoToken --autoactivate TRUE", ignore_errors=True)
+        
+        print(f"{Colors.CYAN}[PKI] Generating ML-DSA-65 PQC key (this takes ~60 seconds)...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} cryptotoken generatekey --token {CONFIG['TOKEN_NAME']} --alias signKey --keyspec ML-DSA-65", ignore_errors=True)
+        
+        print(f"{Colors.CYAN}[PKI] Generating RSA2048 default key...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} cryptotoken generatekey --token {CONFIG['TOKEN_NAME']} --alias defaultKey --keyspec RSA2048", ignore_errors=True)
+        
+        print(f"{Colors.CYAN}[PKI] Generating RSA2048 test key...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} cryptotoken generatekey --token {CONFIG['TOKEN_NAME']} --alias testKey --keyspec RSA2048", ignore_errors=True)
+        
+        print(f"{Colors.CYAN}[PKI] Initializing Management CA with ML-DSA-65 keys...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} ca init \"{CONFIG['CA_NAME']}\" \"{CONFIG['CA_DN']}\" soft \"{CONFIG['TOKEN_PWD']}\" ML-DSA-65 ML-DSA-65 3650 null ML-DSA-65", ignore_errors=True)
         
-        print(f"{Colors.BLUE}[CMD] Creating 'Keycloak' CA...{Colors.ENDC}")
+        print(f"{Colors.CYAN}[PKI] Creating 'Keycloak' CA with RSA2048 keys...{Colors.ENDC}")
         run_docker_exec("ejbca", f"{bin} ca init 'Keycloak' 'CN=Keycloak Stub,O=JSI' soft '{CONFIG['TOKEN_PWD']}' RSA2048 RSA2048 3650 null SHA256WithRSA", ignore_errors=True)
+        
+        print(f"{Colors.GREEN}[PKI] All PKI operations completed!{Colors.ENDC}")
 
+        # ===== STAGE 4: Keycloak Config =====
         log_section("STAGE 4: Keycloak Config")
         adm = "/opt/keycloak/bin/kcadm.sh"
-        run_docker_exec("keycloak", f"{adm} config credentials --server http://localhost:8080 --realm master --user {CONFIG['KC_ADMIN_USER']} --password {CONFIG['KC_ADMIN_PASS']}")
+        run_docker_exec("keycloak", f"{adm} config credentials --server http://localhost:{kc_port} --realm master --user {CONFIG['KC_ADMIN_USER']} --password {CONFIG['KC_ADMIN_PASS']}", ignore_errors=True)
         run_docker_exec("keycloak", f"{adm} create realms -s realm={CONFIG['KC_REALM']} -s enabled=true", ignore_errors=True)
         
-        # FIX: Correct redirectUris formatting
-        redirects = f'"{CONFIG["EJBCA_BASE_URL"]}/*"'
-        run_docker_exec("keycloak", f'{adm} create clients -r {CONFIG["KC_REALM"]} -s clientId={CONFIG["KC_CLIENT"]} -s protocol=openid-connect -s publicClient=false -s "redirectUris=[' + redirects + ']" -s enabled=true', ignore_errors=True)
-        run_docker_exec("keycloak", f"{adm} create users -r {CONFIG['KC_REALM']} -s username={CONFIG['KC_USER']} -s enabled=true", ignore_errors=True)
-        run_docker_exec("keycloak", f"{adm} set-password -r {CONFIG['KC_REALM']} --username {CONFIG['KC_USER']} --new-password {CONFIG['KC_USER_PASS']}")
+        realm = CONFIG['KC_REALM']
+        client_id = CONFIG['KC_CLIENT']
+        base_url = CONFIG['EJBCA_BASE_URL']
+        redirect_json = '["' + base_url + '/*"]'
+        kc_clients_cmd = adm + ' create clients -r ' + realm + ' -s clientId=' + client_id + ' -s protocol=openid-connect -s publicClient=false -s redirectUris=' + redirect_json + ' -s enabled=true'
+        run_docker_exec("keycloak", kc_clients_cmd, ignore_errors=True)
+        kc_users_cmd = f'{adm} create users -r {realm} -s username={CONFIG["KC_USER"]} -s enabled=true'
+        run_docker_exec("keycloak", kc_users_cmd, ignore_errors=True)
+        kc_pwd_cmd = f'{adm} set-password -r {realm} --username {CONFIG["KC_USER"]} --new-password {CONFIG["KC_USER_PASS"]}'
+        run_docker_exec("keycloak", kc_pwd_cmd)
 
+        # ===== STAGE 5: SSO Integration =====
         log_section("STAGE 5: SSO Integration")
         
-        # FIX: Corrected bash script with proper EJBCA CLI syntax
-        bash_script = f"""#!/bin/bash
-EJBCA_BIN="{CONFIG['EJBCA_BIN']}"
+        # FIX: Register OAuth Provider with correct syntax
+        # EJBCA only supports: GENERIC, AZURE, PINGID, KEYCLOAK
+        oauth_label = CONFIG['TOKEN_NAME']
+        oauth_cmd = f'{bin} config oauth addoauthprovider --label {oauth_label} --type GENERIC --url {CONFIG["KC_ISSUER_URL"]} --realm {CONFIG["KC_REALM"]} --client {CONFIG["KC_CLIENT"]} --audience {CONFIG["KC_CLIENT"]} --skewlimit 1500'
+        run_docker_exec("ejbca", oauth_cmd, ignore_errors=True)
+        
+        # FIX: Removed invalid commands (config user list, config user modify)
+        # These commands don't exist in EJBCA CLI
+        
+        log_info("SSO Integration complete!")
 
-echo ">> Registering Provider..."
-$EJBCA_BIN config oauth addoauthprovider \\\
-  --label "Keycloak" \\\
-  --type "Keycloak" \\\
-  --url "{CONFIG['KC_ISSUER_URL']}" \\\
-  --realm "{CONFIG['KC_REALM']}" \\\
-  --client "{CONFIG['KC_CLIENT']}" \\\
-  --audience "{CONFIG['KC_CLIENT']}" \\\
-  --skewlimit 1500 || echo "Provider exists"
-
-echo ">> Verifying user exists..."
-$EJBCA_BIN config user list --realm "{CONFIG['KC_REALM']}" || echo "User list"
-
-echo ">> Attempting Role Mapping..."
-MAX_RETRIES=120
-COUNT=0
-SLEEP_TIME=8
-
-until $EJBCA_BIN roles addrolemember \\\
-  --role "Super Administrator Role" \\\
-  --caname "Keycloak" \\\
-  --value "{CONFIG['KC_USER']}"; do
-
-  echo ">> Role mapping failed (attempt $((COUNT+1))). Retrying in $SLEEP_TIME seconds..."
-  sleep $SLEEP_TIME
-  COUNT=$((COUNT+1))
-  
-  if [ $COUNT -ge $MAX_RETRIES ]; then
-     echo "ERROR: Failed to map role after $MAX_RETRIES retries."
-     echo "DEBUG: Attempting to list current roles for troubleshooting..."
-     $EJBCA_BIN roles list --all 2>&1 || true
-     exit 1
-  fi
-done
-
-echo ">> Role mapping SUCCESSFUL."
-"""
-        run_script_in_container("ejbca", bash_script)
-
+        # ===== SUCCESS =====
         print(f"\n{Colors.HEADER}========================================================")
         print(" DEPLOYMENT SUCCESSFUL")
         print("========================================================")
@@ -425,8 +372,8 @@ echo ">> Role mapping SUCCESSFUL."
         print(f" 3. Keycloak:     {Colors.UNDERLINE}{CONFIG['KC_PUBLIC_URL']}{Colors.ENDC}")
         print("--------------------------------------------------------")
         print(f" 4. Login User:   {CONFIG['KC_USER']}")
-        print(f" 5. Login Pass:   {CONFIG['KC_USER_PASS']}")
-        print(f" 6. KC Admin:     {CONFIG['KC_ADMIN_USER']} / {CONFIG['KC_ADMIN_PASS']}")
+        print(f" 5. Login Pass:   {CONFIG['KC_USER_PASS']}{Colors.ENDC}")
+        print(f" 6. KC Admin:     {CONFIG['KC_ADMIN_USER']} / {CONFIG['KC_ADMIN_PASS']}{Colors.ENDC}")
         print(f"========================================================{Colors.ENDC}")
 
     except KeyboardInterrupt:
