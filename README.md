@@ -130,3 +130,7 @@ Created new user with id 'de9a767f-da72-4074-9415-3e0d59f66579'
  5. Login Pass:   password123
  6. KC Admin:     admin / admin
 ========================================================
+
+
+## 🛡️ Security & Cryptographic Posture
+This project tracks Software & Cryptographic Bill of Materials (SBOM & CBOM) and Post-Quantum Cryptography (PQC) readiness. See the latest [Cryptographic Audit & PQC Migration Report](docs/security/CRYPTOGRAPHIC_AUDIT.md).
