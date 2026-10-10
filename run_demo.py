@@ -366,7 +366,8 @@ volumes:
         run_docker_exec("keycloak", f"{adm} config credentials --server http://localhost:8080 --realm master --user {CONFIG['KC_ADMIN_USER']} --password {CONFIG['KC_ADMIN_PASS']}")
         run_docker_exec("keycloak", f"{adm} create realms -s realm={CONFIG['KC_REALM']} -s enabled=true", ignore_errors=True)
         
-        redirects = f'\"{CONFIG["EJBCA_BASE_URL"]}/*\"'\n        run_docker_exec(\"keycloak\", f\"{adm} create clients -r {CONFIG['KC_REALM']} -s clientId={CONFIG['KC_CLIENT']} -s protocol=openid-connect -s publicClient=false -s \"redirectUris=[{redirects}]\" -s enabled=true\", ignore_errors=True)
+        redirects = f'"{CONFIG["EJBCA_BASE_URL"]}/*"'
+        run_docker_exec("keycloak", f"{adm} create clients -r {CONFIG['KC_REALM']} -s clientId={CONFIG['KC_CLIENT']} -s protocol=openid-connect -s publicClient=false -s redirectUris=[{redirects}] -s enabled=true", ignore_errors=True)
         run_docker_exec("keycloak", f"{adm} create users -r {CONFIG['KC_REALM']} -s username={CONFIG['KC_USER']} -s enabled=true", ignore_errors=True)
         run_docker_exec("keycloak", f"{adm} set-password -r {CONFIG['KC_REALM']} --username {CONFIG['KC_USER']} --new-password {CONFIG['KC_USER_PASS']}")
 
