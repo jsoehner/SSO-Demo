@@ -101,8 +101,13 @@ jobs:
             elif [ -f oss/sbom.spdx.json ]; then
               SBOM_ARG="--sbom oss/sbom.spdx.json"
             fi
+            EXT_ARG=""
+            if [ -f oss/upstream_cbom.json ]; then
+              EXT_ARG="--external-cbom oss/upstream_cbom.json"
+            fi
             python3 scripts/analyze_cbom.py oss/cbom.json \
               $SBOM_ARG \
+              $EXT_ARG \
               --json oss/crypto-analysis.json \
               --markdown oss/crypto-summary.md \
               --step-summary
